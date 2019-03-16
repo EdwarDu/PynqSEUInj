@@ -41,9 +41,15 @@ def decode_far_reg(word: int):
     else:
         half = "BOTTOM"
 
-    return block_type_str, half, row_addr, col_addr, minor_addr
+    return {'b_type': block_type_str,
+            'half': half,
+            'row_addr': row_addr,
+            'col_addr': col_addr,
+            'minor_addr': minor_addr
+            }
 
 # TODO: COMMAND DICT
+
 
 def decode_bs_word(word: int):
     """
@@ -81,6 +87,7 @@ def decode_bs_word(word: int):
         0x0E: ("COR1", "RW", "Configuration Option Register 1"),
         0x10: ("WBSTAR", "RW", "Warm Boot Start Address Register"),
         0x11: ("TIMER", "RW", "Watchdog Timer Register"),
+        0x13: ("CRC?", "RW", "CRC Register??"),
         0x16: ("BOOTSTS", "R", "Boot History Status Register "),
         0x18: ("CTL1", "RW", "Control Register 1"),
         0x1F: ("BSPI", "RW", "BPI/SPI Configuration Options Register")
@@ -104,15 +111,22 @@ def decode_bs_word(word: int):
 
         wc = wc_pt1
 
-        return header_type_str, op_code_str, reg, wc
+        return {'header_type':header_type_str,
+                'op_code': op_code_str,
+                'reg': reg,
+                'wc': wc
+                }
     elif header_type == 0x2:
         header_type_str = "PT2"
         wc = wc_pt2
 
-        return header_type_str, wc
+        return {'header_type':header_type_str,
+                'wc': wc
+                }
     else:
         header_type_str = "--"
-        return header_type_str,
+        return {'header_type':header_type_str
+                }
 
 
 def read_int16_from_file(f):
@@ -127,11 +141,21 @@ def read_int32_from_file(f):
     return struct.unpack('>I', d)[0]
 
 
+def write_int16_to_file(f, d):
+    f.write(struct.pack('>H', d))
+
+
+def write_int32_to_file(f, d):
+    f.write(struct.pack('>I', d))
+
+
 class BitstreamMan:
     """
     Class for manipulating bitstream for
         Pynq
     """
+
+    FRAME_SIZE = 101
 
     def __init__(self, bitstream_file: str):
         if isfile(bitstream_file):
@@ -147,7 +171,7 @@ class BitstreamMan:
             # strip the bitstream file header
             field_len = read_int16_from_file(f_bs)
             field_data = f_bs.read(field_len)  # data words
-            print(field_data)
+            self.data_word = field_data
             field_len = read_int16_from_file(f_bs)
             assert(field_len == 1)
 
@@ -191,38 +215,168 @@ class BitstreamMan:
         for i in range(0, len(self.bs_bin), 4):
             self.bs_words.append(struct.unpack('>I', self.bs_bin[i:i+4])[0])
 
-    def decode_bitstream(self, fout=sys.stdout):
+        self.n_frames = 0
+        self.frame_words = []
+        self.frame_word0_index = 0
+        self.frame_word_lindex = 0
+        self.decode_bitstream(f_debug_out=sys.stdout)
+
+    def generate_bitstream_header(self):
+        bitstream_header = struct.pack('>H', len(self.data_word))
+        bitstream_header += self.data_word
+        bitstream_header += struct.pack('>H', 1) # data length
+        bitstream_header += bytes([0x61]) # Design name
+        bitstream_header += struct.pack('>H', len(self.design_name.encode('utf-8')))
+        bitstream_header += self.design_name.encode('utf-8')
+
+        bitstream_header += bytes([0x62])  # Part name
+        bitstream_header += struct.pack('>H', len(self.part_name.encode('utf-8')))
+        bitstream_header += self.part_name.encode('utf-8')
+
+        bitstream_header += bytes([0x63])  # Date
+        bitstream_header += struct.pack('>H', len(self.design_date.encode('utf-8')))
+        bitstream_header += self.design_date.encode('utf-8')
+
+        bitstream_header += bytes([0x64])  # Time
+        bitstream_header += struct.pack('>H', len(self.design_time.encode('utf-8')))
+        bitstream_header += self.design_time.encode('utf-8')
+
+        bitstream_header += bytes([0x65])  # Bitstream
+        bitstream_header += struct.pack('>I', len(self.bs_bin))
+
+        return bitstream_header
+
+    def decode_bitstream(self, f_debug_out=None):
         word_index = 0
+        previous_reg = None
         while word_index < len(self.bs_words):
             word = self.bs_words[word_index]
             decode_res = decode_bs_word(word)
-            if decode_res[0] == '--':
-                print(f"{hex(word)[2:].zfill(8)} => DUMMY", file=fout)
+
+            if decode_res['header_type'] == '--':
+                if f_debug_out is not None:
+                    print(f"{hex(word)[2:].zfill(8)} => DUMMY", file=f_debug_out)
                 word_index += 1
-            elif decode_res[0] == "PT1":
-                op_code_str = decode_res[1]
-                reg_name, reg_perm, reg_descr = decode_res[2]
-                wc = decode_res[3]
+                previous_reg = None
+            elif decode_res['header_type'] == "PT1":
+                op_code_str = decode_res['op_code']
+                reg_name, reg_perm, reg_descr = decode_res['reg']
+                wc = decode_res['wc']
                 if op_code_str == "NOP":
-                    print(f"{hex(word)[2:].zfill(8)} => NOP", file=fout)
+                    if f_debug_out is not None:
+                        print(f"{hex(word)[2:].zfill(8)} => NOP", file=f_debug_out)
                     assert(wc == 0x0)
+                    previous_reg = None
                 elif op_code_str == "R" or op_code_str == "W":
-                    print(f"{hex(word)[2:].zfill(8)} => {op_code_str} {reg_name} {reg_perm}", file=fout)
-                    #for word_index_i in range(1, wc+1):
-                    #    print(f"\t{hex(self.bs_words[word_index+word_index_i])[2:].zfill(8)}", file=fout)
+                    previous_reg = decode_res['reg']
+                    if f_debug_out is not None:
+                        print(f"{hex(word)[2:].zfill(8)} => {op_code_str} {reg_name} {reg_perm} x{wc}", file=f_debug_out)
+                        for word_index_i in range(1, wc+1):
+                            print(f"\t{hex(self.bs_words[word_index+word_index_i])[2:].zfill(8)}", file=f_debug_out)
                 else:
+                    # previous_reg = None
                     raise ValueError(f"{hex(word)[2:].zfill(8)} => {op_code_str} : UNKNOWN")
 
                 word_index += wc + 1
-            elif decode_res[0] == "PT2":
-                wc = decode_res[1]
-                #for word_index_i in range(1, wc + 1):
-                #    print(f"\t{hex(self.bs_words[word_index + word_index_i])[2:].zfill(8)}", file=fout)
-                word_index += wc
+            elif decode_res['header_type'] == "PT2":
+                wc = decode_res['wc']
+                assert(previous_reg is not None)
+                if previous_reg[0] == 'FDRI':
+                    # FIXME: This is only for the bit file
+                    self.n_frames = int(wc / 101)
+                    assert(self.n_frames * 101 == wc)
+                    self.frame_word0_index = word_index+1
+                    self.frame_word_lindex = word_index+wc
+                    self.frame_words = self.bs_words[self.frame_word0_index:self.frame_word_lindex+1]
+                if f_debug_out is not None:
+                    print(f"PT2 {wc} {previous_reg}", file=f_debug_out)
+                    for word_index_i in range(1, wc + 1):
+                        print(f"\t@{hex(word_index_i)[2:].zfill(8)} "
+                              f"{hex(self.bs_words[word_index + word_index_i])[2:].zfill(8)}",
+                              file=f_debug_out)
+                word_index += wc + 1
             else:
                 raise ValueError(f"{decode_res} UNKNOWN")
+
+    def corrupt_bit(self, frame_index: int, bit_offset_in_frame: int, out_bitstream: str):
+        with open(out_bitstream, 'wb') as f_bs_out:
+            previous_word_crc = False
+
+            f_bs_out.write(self.generate_bitstream_header())
+            # FIXME: if FDRI is splitted, this is not working
+            # All the commands before frame RAW data
+            for word_index in range(0, self.frame_word0_index):
+                write_int32_to_file(f_bs_out, self.bs_words[word_index])
+            corrupt_word_index = frame_index * 101 + int(bit_offset_in_frame / 32)
+            corrupt_word_bit_index = bit_offset_in_frame % 32
+            for i in range(0, self.n_frames * 101):
+                if i == corrupt_word_index:
+                    word = self.frame_words[i] ^ (1 << corrupt_word_bit_index)
+                else:
+                    word = self.frame_words[i]
+                write_int32_to_file(f_bs_out, word)
+            # All the commands after the frame RAW data
+            for word_index in range(self.frame_word_lindex+1, len(self.bs_words)):
+                word = self.bs_words[word_index]
+                decode_res = decode_bs_word(word)
+                if decode_res['header_type'] == 'PT1' and decode_res['op_code'] == 'W' and \
+                        decode_res['reg'][0].startswith('CRC'):
+                    previous_word_crc = True
+                    write_int32_to_file(f_bs_out, 0x2000_0000)  # NOP
+                    continue
+                else:
+                    if previous_word_crc:
+                        write_int32_to_file(f_bs_out, 0x2000_0000)  # NOP
+                    else:
+                        write_int32_to_file(f_bs_out, self.bs_words[word_index])
+                    previous_word_crc = False
+
+    def dump_bitstream(self, out_bitstream: str):
+        """
+        NO CRC WRITE
+        :param out_bitstream:
+        :return:
+        """
+        with open(out_bitstream, 'wb') as f_bs_out:
+            previous_word_crc = False
+            f_bs_out.write(self.generate_bitstream_header())
+
+            # FIXME: if FDRI is splitted, this is not working
+            # All the commands before frame RAW data
+            for word_index in range(0, self.frame_word0_index):
+                write_int32_to_file(f_bs_out, self.bs_words[word_index])
+            for i in range(0, self.n_frames * 101):
+                word = self.frame_words[i]
+                write_int32_to_file(f_bs_out, word)
+
+            # All the commands after the frame RAW data
+            for word_index in range(self.frame_word_lindex + 1, len(self.bs_words)):
+                word = self.bs_words[word_index]
+                decode_res = decode_bs_word(word)
+                if decode_res['header_type'] == 'PT1' and decode_res['op_code'] == 'W' and \
+                        decode_res['reg'][0].startswith('CRC'):
+                    previous_word_crc = True
+                    write_int32_to_file(f_bs_out, 0x2000_0000)  # NOP
+                    continue
+                else:
+                    if previous_word_crc:
+                        write_int32_to_file(f_bs_out, 0x2000_0000)  # NOP
+                    else:
+                        write_int32_to_file(f_bs_out, self.bs_words[word_index])
+                    previous_word_crc = False
 
 
 if __name__ == '__main__':
     bman = BitstreamMan("./PynqBNN_Test/cnvW1A1-pynqZ1-Z2.bit")
-    bman.decode_bitstream()
+    # bman.decode_bitstream()
+    print(bman.design_name)
+    print(bman.part_name)
+    print(bman.design_date)
+    print(bman.design_time)
+    print(f"# Frames: {bman.n_frames}")
+
+    for i in range(0x00061d32, 0x00062d32):
+        bman.frame_words[i] = 0x0
+
+    bman.dump_bitstream('./cnvW1A1-pynqZ1-Z2.bit')
+
