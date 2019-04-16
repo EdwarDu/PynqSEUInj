@@ -428,9 +428,31 @@ def load_ll_file(ll_filename: str):
     return ll_lst
 
 
+import time
+
 if __name__ == '__main__':
-    bman = BitstreamMan("./PynqBNN_Test/cnvW1A1-pynqZ1-Z2.bit")
-    bman.decode_bitstream(f_debug_out=sys.stdout)
+    start_time = time.time()
+    bman = BitstreamMan(sys.argv[1])
+    end_time = time.time()
+    print(f"Loading {sys.argv[1]} cost {end_time-start_time} seconds")
+
+    with open('./original.log', 'w') as f_orig:
+        bman.decode_bitstream(f_debug_out=f_orig)
+
+    bit_value = bman.get_bit(0)
+    bit_value = 0 if bit_value == 1 else 1
+    bman.set_bit(0, bit_value)
+
+    start_time = time.time()
+    bman.dump_bitstream('./faulty.bit')
+    end_time = time.time()
+    print(f"Dumping ./faulty.bit cost {end_time-start_time} seconds")
+
+    bman_f = BitstreamMan('./faulty.bit')
+
+    with open('./faulty.log', 'w') as f_faulty:
+        bman_f.decode_bitstream(f_debug_out=f_faulty)
+
     print(bman.design_name)
     print(bman.part_name)
     print(bman.design_date)
