@@ -4,6 +4,7 @@ import os
 from os.path import isfile
 import struct
 import sys
+import re
 
 """
 WARNING: This is only intended for 7Series Xilinx FPGA
@@ -219,7 +220,7 @@ class BitstreamMan:
         self.frame_words = []
         self.frame_word0_index = 0
         self.frame_word_lindex = 0
-        self.decode_bitstream(f_debug_out=sys.stdout)
+        self.decode_bitstream(f_debug_out=None)
 
     def generate_bitstream_header(self):
         bitstream_header = struct.pack('>H', len(self.data_word))
@@ -365,18 +366,83 @@ class BitstreamMan:
                         write_int32_to_file(f_bs_out, self.bs_words[word_index])
                     previous_word_crc = False
 
+    def frame_bit_addr_to_bit_offset(self, frame_l_addr, frame_w_index, frame_w_b_offset):
+        return frame_l_addr * self.FRAME_SIZE * 32 + frame_w_index * 32 + frame_w_b_offset
+
+    def bit_offset_to_frame_bit_addr(self, bit_offset):
+        frame_l_addr = int(bit_offset / (self.FRAME_SIZE*32))
+        frame_w_index = int((bit_offset - frame_l_addr * self.FRAME_SIZE *32) / 32)
+        frame_w_b_offset = bit_offset % 32
+        return frame_l_addr, frame_w_index, frame_w_b_offset
+
+    def get_bit(self, bit_offset):
+        frame_l_addr, frame_w_index, frame_w_b_offset = self.bit_offset_to_frame_bit_addr(bit_offset)
+        frame_word = self.frame_words[frame_l_addr*self.FRAME_SIZE + frame_w_index]
+        if frame_word & (1 << frame_w_b_offset) != 0x0:
+            return 1
+        else:
+            return 0
+
+    def set_bit(self, bit_offset, value):
+        frame_l_addr, frame_w_index, frame_w_b_offset = self.bit_offset_to_frame_bit_addr(bit_offset)
+        frame_word = self.frame_words[frame_l_addr*self.FRAME_SIZE + frame_w_index]
+        if value == 1:
+            frame_word = frame_word | (1 << frame_w_b_offset)
+        else:
+            frame_word = frame_word & (~(1 << frame_w_b_offset))
+        self.frame_words[frame_l_addr*self.FRAME_SIZE + frame_w_index] = frame_word
+        return frame_word
+
+    def get_word(self, frame_l_addr, frame_w_index):
+        return self.frame_words[frame_l_addr*self.FRAME_SIZE + frame_w_index]
+
+    def set_word(self, frame_l_addr, frame_w_index, word_new):
+        self.frame_words[frame_l_addr * self.FRAME_SIZE + frame_w_index] = word_new
+
+
+def load_ll_file(ll_filename: str):
+    assert(isfile(ll_filename))
+    ll_lst = []
+    with open(ll_filename, 'r') as f_ll:
+        for line in f_ll:
+            if not line.startswith("Bit "):
+                continue
+            else:
+                line_parts = [x for x in re.split(" |\t|\n", line) if x != '']
+                bit_offset = int(line_parts[1])
+                frame_addr = int(line_parts[2], 16)
+                frame_b_offset = int(line_parts[3])
+                bit_dict = {
+                    "bit_offset": bit_offset,
+                    "frame_addr": frame_addr,
+                    "frame_b_offset": frame_b_offset
+                }
+
+                for i in range(4, len(line_parts)):
+                    line_part = line_parts[i]
+                    key, value = re.split("=",  line_part)
+                    bit_dict[key] = value
+
+                ll_lst.append(bit_dict)
+
+    return ll_lst
+
 
 if __name__ == '__main__':
     bman = BitstreamMan("./PynqBNN_Test/cnvW1A1-pynqZ1-Z2.bit")
-    # bman.decode_bitstream()
+    bman.decode_bitstream(f_debug_out=sys.stdout)
     print(bman.design_name)
     print(bman.part_name)
     print(bman.design_date)
     print(bman.design_time)
     print(f"# Frames: {bman.n_frames}")
 
-    for i in range(0x00061d32, 0x00062d32):
-        bman.frame_words[i] = 0x0
+    # for i in range(0x00061d32, 0x00062d32):
+    #     bman.frame_words[i] = 0x0
 
-    bman.dump_bitstream('./cnvW1A1-pynqZ1-Z2.bit')
+    # bman.dump_bitstream('./cnvW1A1-pynqZ1-Z2.bit')
+
+    # ll_lst = load_ll_file("./PynqBNN_Test/cnvW1A1-pynqZ1-Z2.ll")
+
+
 
