@@ -121,6 +121,7 @@ def wait_run():
     timeout = request.form.get('timeout')
     timeout = float(timeout) if timeout is not None else 5
     if current_fi_run is None:
+        print('[ERROR] Not running')
         return jsonify({
             'index': -1,
             'name': 'n/a',
@@ -130,16 +131,25 @@ def wait_run():
         try:
             current_fi_run.join(timeout=timeout)
             current_fi_run = None
-            fi_p_parent.poll(timeout=timeout)
-            return jsonify(fi_p_parent.recv())
+            if fi_p_parent.poll(timeout=timeout):
+                class_res = fi_p_parent.recv()
+
+            else:
+                class_res = {
+                    'index': -1,
+                    'name': 'n/a',
+                    'duration': 0
+                }
         except TimeoutError as toe:
             current_fi_run.terminate()
+            class_res = {
+                'index': -1,
+                'name': 'n/a',
+                'duration': 0
+            }
 
-        return jsonify({
-            'index': -1,
-            'name': 'n/a',
-            'duration': 0
-        })
+        print(class_res)
+        return jsonify(class_res)
 
 
 app.run(host='0.0.0.0', port=5200)

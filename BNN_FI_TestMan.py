@@ -10,7 +10,7 @@ import sqlite3
 import shutil
 
 
-server_lst = ['http://pynq1:5200', ]  # 'pynq2:5200', 'pynq3:5200']
+server_lst = ['http://pynq1:5200', 'http://pynq2:5200', 'http://pynq3:5200']
 
 NETWORK_NAME = 'cnvW1A1'
 PLATFORM = 'pynqZ1-Z2'
@@ -107,7 +107,7 @@ def client_thread(kill_switch: Event, flist_lock: Lock, server: str, conn, conn_
             network_name = fault['network_name']
             faulty_bit = fault['bit_offset']
 
-            print(f'Launching fault injection with bitstream {faulty_bitstream} x {faulty_bit} on {server}')
+            print(f'{server}: Launching fault injection with bitstream {faulty_bitstream} x {faulty_bit} ')
 
             r = requests.post(server + '/fault_inj',
                               files={
@@ -118,7 +118,7 @@ def client_thread(kill_switch: Event, flist_lock: Lock, server: str, conn, conn_
                               })
 
             if r.status_code != 200:
-                print(f'Failed to launch fault injection on server {server}')
+                print(f'{server}: Failed to launch fault injection on server {server}')
                 return
 
             r = requests.post(server + '/wait_run',
@@ -127,7 +127,7 @@ def client_thread(kill_switch: Event, flist_lock: Lock, server: str, conn, conn_
                               })
 
             if r.status_code != 200:
-                print(f'Failed to retrieve fault injection results')
+                print(f'{server}: Failed to retrieve fault injection results')
                 return
 
             fi_result = r.json()
@@ -135,7 +135,7 @@ def client_thread(kill_switch: Event, flist_lock: Lock, server: str, conn, conn_
             class_name = fi_result['name']
             class_duration = fi_result['duration']
 
-            print(f'FI: {class_index}, {class_name}, {class_duration}')
+            print(f'{server}: FI = {class_index}, {class_name}, {class_duration}')
 
             update_fault_rec(conn, conn_lock, bit_offset=faulty_bit,
                              executed='Y',
@@ -183,7 +183,7 @@ def genrate_faults(flist_lock: Lock,
             while True:
                 with flist_lock:
                     if len(fault_list) >= 50:
-                        time.sleep(2)
+                        pass
                     else:
                         fault_list.append({
                             'faulty_bitstream': faulty_bitstream_file,
@@ -192,12 +192,16 @@ def genrate_faults(flist_lock: Lock,
                         })
                         break
 
+                time.sleep(1)
+
     while True:
         with flist_lock:
             if len(fault_list) != 0:
-                time.sleep(2)
+                pass
             else:
                 break
+
+        time.sleep(1)
 
 
 thread_kill_switchs = []
@@ -219,7 +223,6 @@ for kill_s in thread_kill_switchs:
     kill_s.clear()
 
 for t in threads:
-    t.join(timeout=5)
-
+    t.join()
 
 db_conn.close()
