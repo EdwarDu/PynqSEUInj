@@ -418,11 +418,13 @@ def load_ll_file(ll_filename: str):
                     "frame_b_offset": frame_b_offset
                 }
 
-                for i in range(4, len(line_parts)):
-                    line_part = line_parts[i]
-                    key, value = re.split("=",  line_part)
-                    bit_dict[key] = value
+                bit_props = ','.join(line_parts[4:])
+                bit_dict['props'] = bit_props
 
+                #for i in range(4, len(line_parts)):
+                #    line_part = line_parts[i]
+                #    key, value = re.split("=",  line_part)
+                #    bit_dict[key] = value
                 ll_lst.append(bit_dict)
 
     return ll_lst
