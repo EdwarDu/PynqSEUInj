@@ -10,7 +10,11 @@ import sqlite3
 import shutil
 
 
-server_lst = ['http://pynq1:5200', 'http://pynq2:5200', 'http://pynq3:5200']
+server_lst = ['http://pynq1:5200', 
+              'http://pynq2:5200', 
+              'http://pynq3:5200',
+              'http://pynq4:5200',
+              'http://pynq5:5200']
 
 NETWORK_NAME = 'cnvW1A1'
 PLATFORM = 'pynqZ1-Z2'
@@ -156,7 +160,9 @@ def genrate_faults(flist_lock: Lock,
     bman = BitstreamMan(original_bs_file)
 
     # Load LL file
+    print(f"Loading Logic Location file {original_ll_file} ...")
     ll_list = load_ll_file(original_ll_file)
+    print("Done")
     for bit_dict in ll_list:
         bit_offset = bit_dict['bit_offset']
         frame_addr = bit_dict['frame_addr']
