@@ -162,17 +162,22 @@ def genrate_faults(flist_lock: Lock,
     # Load LL file
     print(f"Loading Logic Location file {original_ll_file} ...")
     ll_list = load_ll_file(original_ll_file)
-    print("Done")
+    total_faults = len(ll_list)
+    print(f"Done ... total faults {total_faults}")
+
+    index = 1
     for bit_dict in ll_list:
         bit_offset = bit_dict['bit_offset']
         frame_addr = bit_dict['frame_addr']
         frame_b_offset = bit_dict['frame_b_offset']
         bit_props = bit_dict['props']
         if is_fault_executed(db_conn, db_conn_lock, bit_offset):
-            print(f"F@{bit_offset} has already been executed")
+            print(f"F {index}/{total_faults} @{bit_offset} has already been executed")
+            index += 1
             continue
         else:
-            print(f"Scheduling F@{bit_offset}")
+            print(f"Scheduling F {index}/{total_faults} @{bit_offset}")
+            index += 1
             update_fault_rec(db_conn, db_conn_lock, bit_offset=bit_offset,
                              executed='N',
                              frame_addr=frame_addr,
