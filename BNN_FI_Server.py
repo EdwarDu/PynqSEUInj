@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import bnn
+from pynq import Xlnk
 from BitstreamMan import BitstreamMan
 import os
 import shutil
@@ -15,6 +16,8 @@ current_fi_run = None
 
 BNN_BISTREAM_DIR = '/usr/local/lib/python3.6/dist-packages/bnn/bitstreams/'
 PLATFORM = 'pynqZ1-Z2'
+
+xlnk = Xlnk()
 
 
 def generate_faulty(original_bitstream_filename: str,
@@ -116,39 +119,55 @@ def is_running():
 
 @app.route('/wait_run', methods=['POST', 'GET'])
 def wait_run():
-    global current_fi_run, fi_p_parent
+    global current_fi_run, fi_p_parent, fi_run_p_child, xlnk
 
     timeout = request.form.get('timeout')
     timeout = float(timeout) if timeout is not None else 5
+    print(f'*************[INFO]:Waiting for timeout = {timeout} secs')
     if current_fi_run is None:
-        print('[ERROR] Not running')
+        print('*************[ERROR]: Not running')
         return jsonify({
             'index': -1,
-            'name': 'n/a',
+            'name': 'fi failed',
             'duration': -1
         })
     else:
         try:
             current_fi_run.join(timeout=timeout)
+            if current_fi_run.exitcode is None:
+                raise TimeoutError()
+
+            print(f'*************[INFO]: Run finished successfully')
             current_fi_run = None
             if fi_p_parent.poll(timeout=timeout):
                 class_res = fi_p_parent.recv()
-
+                print(f'Result ==> {class_res}')
             else:
+                print(f'*************[ERROR]: Failed to get results within {timeout} secs')
+                print(f'*************[WARNING]: Recreating Pipe')
+                fi_p_parent, fi_run_p_child = Pipe()
                 class_res = {
                     'index': -1,
-                    'name': 'n/a',
+                    'name': 'timeout',
                     'duration': 0
                 }
         except TimeoutError as toe:
-            current_fi_run.terminate()
+            print('*************[ERROR]: Time out')
+            if current_fi_run is not None:
+                while current_fi_run.is_alive():
+                    print(f'*************[WARNING]: Terminating the run')
+                    current_fi_run.terminate()
+                    time.sleep(1)
+                current_fi_run = None
+            print('*************[WARNING]: Recreating the Pipe')
+            fi_p_parent, fi_run_p_child = Pipe()
             class_res = {
                 'index': -1,
-                'name': 'n/a',
+                'name': 'timeout',
                 'duration': 0
             }
 
-        print(class_res)
+        xlnk.xlnk_reset()
         return jsonify(class_res)
 
 

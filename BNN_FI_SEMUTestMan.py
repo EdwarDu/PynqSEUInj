@@ -11,8 +11,8 @@ import shutil
 import random
 
 
-server_lst = ['http://pynq1:5200', 
-              'http://pynq2:5200', 
+server_lst = ['http://pynq1:5200',
+              'http://pynq2:5200',
               'http://pynq3:5200',
               'http://pynq4:5200',
               'http://pynq5:5200']
@@ -23,9 +23,9 @@ PLATFORM = 'pynqZ1-Z2'
 fault_list = []
 fault_list_lock = Lock()
 
-db_conn = sqlite3.connect('faults_inj_res.db', check_same_thread=False)
-db_conn.execute('''CREATE TABLE IF NOT EXISTS faults (
-bit_offset INT PRIMARY KEY, 
+db_conn = sqlite3.connect('faults_inj_res_semu.db', check_same_thread=False)
+db_conn.execute('''CREATE TABLE IF NOT EXISTS semu_faults (
+bits TEXT PRIMARY KEY, 
 executed VARCHAR(1), 
 frame_addr INT, 
 frame_b_offset INT,
@@ -37,10 +37,10 @@ db_conn.commit()
 db_conn_lock = Lock()
 
 
-def is_fault_executed(conn, conn_lock, bit_offset):
+def is_fault_executed(conn, conn_lock, bits):
     with conn_lock:
         c = conn.cursor()
-        c.execute('SELECT * FROM faults where bit_offset=? and executed=?', (bit_offset, 'Y'))
+        c.execute('SELECT * FROM faults where bits=? and executed=?', (bits, 'Y'))
         r = c.fetchone()
         conn.commit()
         if r is None:
@@ -50,17 +50,17 @@ def is_fault_executed(conn, conn_lock, bit_offset):
 
 
 def update_fault_rec(conn, conn_lock,
-                     bit_offset,
-                     executed = 'Y',
-                     frame_addr = None,
-                     frame_b_offset = None,
-                     bit_props = None,
-                     class_index = None,
-                     class_name = None,
-                     class_duration = None):
+                     bits,
+                     executed='Y',
+                     frame_addr=None,
+                     frame_b_offset=None,
+                     bit_props=None,
+                     class_index=None,
+                     class_name=None,
+                     class_duration=None):
     with conn_lock:
         c = conn.cursor()
-        c.execute('insert or ignore into faults (bit_offset, executed) values (?, ?)', (bit_offset, "N"))
+        c.execute('insert or ignore into faults (bits, executed) values (?, ?)', (bits, "N"))
         conn.commit()
         sql_update_command = 'update faults set '
         temp_lst = []
@@ -88,8 +88,8 @@ def update_fault_rec(conn, conn_lock,
             params_lst.append(class_duration)
 
         sql_update_command += ','.join(temp_lst)
-        sql_update_command += ' where bit_offset=?'
-        params_lst.append(bit_offset)
+        sql_update_command += ' where bits=?'
+        params_lst.append(bits)
 
         c.execute(sql_update_command, params_lst)
         conn.commit()
@@ -110,9 +110,9 @@ def client_thread(kill_switch: Event, flist_lock: Lock, server: str, conn, conn_
         else:
             faulty_bitstream = fault['faulty_bitstream']
             network_name = fault['network_name']
-            faulty_bit = fault['bit_offset']
+            faulty_bits = fault['bits']
 
-            print(f'{server}: Launching fault injection with bitstream {faulty_bitstream} x {faulty_bit} ')
+            print(f'{server}: Launching fault injection with bitstream {faulty_bitstream} x {faulty_bits} ')
 
             r = requests.post(server + '/fault_inj',
                               files={
@@ -129,7 +129,7 @@ def client_thread(kill_switch: Event, flist_lock: Lock, server: str, conn, conn_
 
             r = requests.post(server + '/wait_run',
                               data={
-                                  'timeout': 10
+                                  'timeout': 5
                               })
 
             if r.status_code != 200:
@@ -144,7 +144,7 @@ def client_thread(kill_switch: Event, flist_lock: Lock, server: str, conn, conn_
 
             print(f'{server}: FI = {class_index}, {class_name}, {class_duration}')
 
-            update_fault_rec(conn, conn_lock, bit_offset=faulty_bit,
+            update_fault_rec(conn, conn_lock, bits=faulty_bits,
                              executed='Y',
                              class_index=class_index,
                              class_name=class_name,
@@ -152,6 +152,21 @@ def client_thread(kill_switch: Event, flist_lock: Lock, server: str, conn, conn_
 
             # Clean up
             os.remove(faulty_bitstream)
+
+
+def random_select_m_in_n(m: int, n: list):
+    assert(m <= len(n))
+
+    if m == 0:
+        return []
+    elif m == len(n):
+        return n
+    else:
+        i = random.randint(0, len(n)-1)
+        selected = [n[i], ]
+        rest = [n[j] for j in range(0, len(n)) if j != i]
+
+        return selected + random_select_m_in_n(m-1, rest)
 
 
 def genrate_faults(flist_lock: Lock,
@@ -163,90 +178,63 @@ def genrate_faults(flist_lock: Lock,
     bman = BitstreamMan(original_bs_file)
 
     # Load LL file
-    print(f"Loading Logic Location file {original_ll_file} ...")
-    ll_list = load_ll_file(original_ll_file)
-    total_faults = len(ll_list)
-    print(f"Done ... total faults {total_faults}")
-
-    ll_bitoffset = [bit_dict['bit_offset'] for bit_dict in ll_list]
+    # print(f"Loading Logic Location file {original_ll_file} ...")
+    # ll_list = load_ll_file(original_ll_file)
+    # print(f"Done ... total faults {total_faults}")
 
     index = 1
     total_faults = 10000
     while index < total_faults:
-        bit_offset = random.randint(0, bman.N_WORDS_IN_FRAME * bman.n_frames * 32)
-        if bit_offset in ll_bitoffset:
-            continue
-        else:
-            print(f"Scheduling F {index}/{total_faults} @{bit_offset}")
-            frame_addr = hex(int(bit_offset / (bman.N_WORDS_IN_FRAME*32)))
-            frame_b_offset = bit_offset % (bman.N_WORDS_IN_FRAME*32)
-            bit_props = 'RANDOM'
-            update_fault_rec(db_conn, db_conn_lock, bit_offset=bit_offset,
-                             executed='N',
-                             frame_addr=frame_addr,
-                             frame_b_offset=frame_b_offset,
-                             bit_props=bit_props)
+        frame_index = random.randint(0, bman.n_frames-1)
+        frame_b_offset = random.randint(0, bman.N_WORDS_IN_FRAME * 32 - 3)
 
+        n_bits = 4
+
+        bits_offset = []
+        for frame_i in (frame_index, frame_index+1):
+            for frame_b_i in range(frame_b_offset, frame_b_offset+3):
+                bits_offset.append(frame_i * bman.N_WORDS_IN_FRAME*32 + frame_b_i)
+
+        actual_bits_offset = sorted(random_select_m_in_n(n_bits, bits_offset))
+        bits_str = '-'.join(actual_bits_offset)
+
+        if is_fault_executed(db_conn, db_conn_lock, bits_str):
+            continue
+
+        bit_props = 'RANDOM SEMU_'+str(n_bits)
+        update_fault_rec(db_conn, db_conn_lock, bits=bits_str,
+                         executed='N',
+                         frame_addr=hex(frame_index),
+                         frame_b_offset=frame_b_offset,
+                         bit_props=bit_props)
+
+        for bit_offset in actual_bits_offset:
             bit_value = bman.get_bit(bit_offset)
             bit_value_f = 0 if bit_value == 1 else 1
             bman.set_bit(bit_offset, bit_value_f)
-            faulty_bitstream_file = f'./FAULTY_BITSTREAMS/{NETWORK_NAME}-{PLATFORM}-F{bit_offset}.bit'
-            bman.dump_bitstream(faulty_bitstream_file)
-            bman.set_bit(bit_offset, bit_value)
 
-            while True:
-                with flist_lock:
-                    if len(fault_list) >= 50:
-                        pass
-                    else:
-                        fault_list.append({
-                            'faulty_bitstream': faulty_bitstream_file,
-                            'network_name': NETWORK_NAME,
-                            'bit_offset': bit_offset
-                        })
-                        index += 1
-                        break
+        faulty_bitstream_file = f'./FAULTY_BITSTREAMS/{NETWORK_NAME}-{PLATFORM}-F{bits_str}.bit'
+        bman.dump_bitstream(faulty_bitstream_file)
 
-                time.sleep(1)
+        for bit_offset in actual_bits_offset:
+            bit_value = bman.get_bit(bit_offset)
+            bit_value_f = 0 if bit_value == 1 else 1
+            bman.set_bit(bit_offset, bit_value_f)
 
-    # for bit_dict in ll_list:
-    #     bit_offset = bit_dict['bit_offset']
-    #     frame_addr = bit_dict['frame_addr']
-    #     frame_b_offset = bit_dict['frame_b_offset']
-    #     bit_props = bit_dict['props']
-    #     if is_fault_executed(db_conn, db_conn_lock, bit_offset):
-    #         print(f"F {index}/{total_faults} @{bit_offset} has already been executed")
-    #         index += 1
-    #         continue
-    #     else:
-    #         print(f"Scheduling F {index}/{total_faults} @{bit_offset}")
-    #         index += 1
-    #         update_fault_rec(db_conn, db_conn_lock, bit_offset=bit_offset,
-    #                          executed='N',
-    #                          frame_addr=frame_addr,
-    #                          frame_b_offset=frame_b_offset,
-    #                          bit_props=bit_props)
-    #
-    #         bit_value = bman.get_bit(bit_offset)
-    #         bit_value_f = 0 if bit_value == 1 else 1
-    #         bman.set_bit(bit_offset, bit_value_f)
-    #         faulty_bitstream_file = f'./FAULTY_BITSTREAMS/{NETWORK_NAME}-{PLATFORM}-F{bit_offset}.bit'
-    #         bman.dump_bitstream(faulty_bitstream_file)
-    #         bman.set_bit(bit_offset, bit_value)
-    #
-    #         while True:
-    #             with flist_lock:
-    #                 if len(fault_list) >= 50:
-    #                     pass
-    #                 else:
-    #                     fault_list.append({
-    #                         'faulty_bitstream': faulty_bitstream_file,
-    #                         'network_name': NETWORK_NAME,
-    #                         'bit_offset': bit_offset
-    #                     })
-    #                     break
-    #
-    #             time.sleep(1)
+        while True:
+            with flist_lock:
+                if len(fault_list) >= 50:
+                    pass
+                else:
+                    fault_list.append({
+                        'faulty_bitstream': faulty_bitstream_file,
+                        'network_name': NETWORK_NAME,
+                        'bits': bits_str
+                    })
+                    index += 1
+                    break
+
+            time.sleep(1)
 
     while True:
         with flist_lock:

@@ -156,7 +156,7 @@ class BitstreamMan:
         Pynq
     """
 
-    FRAME_SIZE = 101
+    N_WORDS_IN_FRAME = 101
 
     def __init__(self, bitstream_file: str):
         if isfile(bitstream_file):
@@ -284,8 +284,8 @@ class BitstreamMan:
                 assert(previous_reg is not None)
                 if previous_reg[0] == 'FDRI':
                     # FIXME: This is only for the bit file
-                    self.n_frames = int(wc / 101)
-                    assert(self.n_frames * 101 == wc)
+                    self.n_frames = int(wc / self.N_WORDS_IN_FRAME)
+                    assert(self.n_frames * self.N_WORDS_IN_FRAME == wc)
                     self.frame_word0_index = word_index+1
                     self.frame_word_lindex = word_index+wc
                     self.frame_words = self.bs_words[self.frame_word0_index:self.frame_word_lindex+1]
@@ -308,9 +308,9 @@ class BitstreamMan:
             # All the commands before frame RAW data
             for word_index in range(0, self.frame_word0_index):
                 write_int32_to_file(f_bs_out, self.bs_words[word_index])
-            corrupt_word_index = frame_index * 101 + int(bit_offset_in_frame / 32)
+            corrupt_word_index = frame_index * self.N_WORDS_IN_FRAME + int(bit_offset_in_frame / 32)
             corrupt_word_bit_index = bit_offset_in_frame % 32
-            for i in range(0, self.n_frames * 101):
+            for i in range(0, self.n_frames * self.N_WORDS_IN_FRAME):
                 if i == corrupt_word_index:
                     word = self.frame_words[i] ^ (1 << corrupt_word_bit_index)
                 else:
@@ -346,7 +346,7 @@ class BitstreamMan:
             # All the commands before frame RAW data
             for word_index in range(0, self.frame_word0_index):
                 write_int32_to_file(f_bs_out, self.bs_words[word_index])
-            for i in range(0, self.n_frames * 101):
+            for i in range(0, self.n_frames * self.N_WORDS_IN_FRAME):
                 word = self.frame_words[i]
                 write_int32_to_file(f_bs_out, word)
 
@@ -367,17 +367,17 @@ class BitstreamMan:
                     previous_word_crc = False
 
     def frame_bit_addr_to_bit_offset(self, frame_l_addr, frame_w_index, frame_w_b_offset):
-        return frame_l_addr * self.FRAME_SIZE * 32 + frame_w_index * 32 + frame_w_b_offset
+        return frame_l_addr * self.N_WORDS_IN_FRAME * 32 + frame_w_index * 32 + frame_w_b_offset
 
     def bit_offset_to_frame_bit_addr(self, bit_offset):
-        frame_l_addr = int(bit_offset / (self.FRAME_SIZE*32))
-        frame_w_index = int((bit_offset - frame_l_addr * self.FRAME_SIZE *32) / 32)
+        frame_l_addr = int(bit_offset / (self.N_WORDS_IN_FRAME*32))
+        frame_w_index = int((bit_offset - frame_l_addr * self.N_WORDS_IN_FRAME *32) / 32)
         frame_w_b_offset = bit_offset % 32
         return frame_l_addr, frame_w_index, frame_w_b_offset
 
     def get_bit(self, bit_offset):
         frame_l_addr, frame_w_index, frame_w_b_offset = self.bit_offset_to_frame_bit_addr(bit_offset)
-        frame_word = self.frame_words[frame_l_addr*self.FRAME_SIZE + frame_w_index]
+        frame_word = self.frame_words[frame_l_addr*self.N_WORDS_IN_FRAME + frame_w_index]
         if frame_word & (1 << frame_w_b_offset) != 0x0:
             return 1
         else:
@@ -385,19 +385,19 @@ class BitstreamMan:
 
     def set_bit(self, bit_offset, value):
         frame_l_addr, frame_w_index, frame_w_b_offset = self.bit_offset_to_frame_bit_addr(bit_offset)
-        frame_word = self.frame_words[frame_l_addr*self.FRAME_SIZE + frame_w_index]
+        frame_word = self.frame_words[frame_l_addr*self.N_WORDS_IN_FRAME + frame_w_index]
         if value == 1:
             frame_word = frame_word | (1 << frame_w_b_offset)
         else:
             frame_word = frame_word & (~(1 << frame_w_b_offset))
-        self.frame_words[frame_l_addr*self.FRAME_SIZE + frame_w_index] = frame_word
+        self.frame_words[frame_l_addr*self.N_WORDS_IN_FRAME + frame_w_index] = frame_word
         return frame_word
 
     def get_word(self, frame_l_addr, frame_w_index):
-        return self.frame_words[frame_l_addr*self.FRAME_SIZE + frame_w_index]
+        return self.frame_words[frame_l_addr*self.N_WORDS_IN_FRAME + frame_w_index]
 
     def set_word(self, frame_l_addr, frame_w_index, word_new):
-        self.frame_words[frame_l_addr * self.FRAME_SIZE + frame_w_index] = word_new
+        self.frame_words[frame_l_addr * self.N_WORDS_IN_FRAME + frame_w_index] = word_new
 
 
 def load_ll_file(ll_filename: str):
