@@ -40,7 +40,7 @@ db_conn_lock = Lock()
 def is_fault_executed(conn, conn_lock, bits):
     with conn_lock:
         c = conn.cursor()
-        c.execute('SELECT * FROM faults where bits=? and executed=?', (bits, 'Y'))
+        c.execute('SELECT * FROM semu_faults where bits=? and executed=?', (bits, 'Y'))
         r = c.fetchone()
         conn.commit()
         if r is None:
@@ -60,9 +60,9 @@ def update_fault_rec(conn, conn_lock,
                      class_duration=None):
     with conn_lock:
         c = conn.cursor()
-        c.execute('insert or ignore into faults (bits, executed) values (?, ?)', (bits, "N"))
+        c.execute('insert or ignore into semu_faults (bits, executed) values (?, ?)', (bits, "N"))
         conn.commit()
-        sql_update_command = 'update faults set '
+        sql_update_command = 'update semu_faults set '
         temp_lst = []
         params_lst = []
         if executed is not None:
@@ -114,26 +114,30 @@ def client_thread(kill_switch: Event, flist_lock: Lock, server: str, conn, conn_
 
             print(f'{server}: Launching fault injection with bitstream {faulty_bitstream} x {faulty_bits} ')
 
-            r = requests.post(server + '/fault_inj',
-                              files={
-                                'faulty_bitstream': open(faulty_bitstream, 'rb')
-                              },
-                              data={
-                                  'network_name': network_name,
-                              })
+            try:
+                r = requests.post(server + '/fault_inj',
+                                  files={
+                                    'faulty_bitstream': open(faulty_bitstream, 'rb')
+                                  },
+                                  data={
+                                      'network_name': network_name,
+                                  })
 
-            if r.status_code != 200:
-                print(f'{server}: Failed to launch fault injection on server {server}')
-                time.sleep(10)
-                continue
+                if r.status_code != 200:
+                    print(f'{server}: Failed to launch fault injection on server {server}')
+                    time.sleep(10)
+                    continue
 
-            r = requests.post(server + '/wait_run',
-                              data={
-                                  'timeout': 5
-                              })
+                r = requests.post(server + '/wait_run',
+                                  data={
+                                      'timeout': 10
+                                  })
 
-            if r.status_code != 200:
-                print(f'{server}: Failed to retrieve fault injection results')
+                if r.status_code != 200:
+                    print(f'{server}: Failed to retrieve fault injection results')
+                    time.sleep(10)
+                    continue
+            except Exception:
                 time.sleep(10)
                 continue
 
@@ -196,10 +200,12 @@ def genrate_faults(flist_lock: Lock,
                 bits_offset.append(frame_i * bman.N_WORDS_IN_FRAME*32 + frame_b_i)
 
         actual_bits_offset = sorted(random_select_m_in_n(n_bits, bits_offset))
-        bits_str = '-'.join(actual_bits_offset)
+        bits_str = '-'.join([str(x) for x in actual_bits_offset])
 
         if is_fault_executed(db_conn, db_conn_lock, bits_str):
             continue
+
+        print(f'scheduling {index} out of {total_faults} with {bits_str}')
 
         bit_props = 'RANDOM SEMU_'+str(n_bits)
         update_fault_rec(db_conn, db_conn_lock, bits=bits_str,

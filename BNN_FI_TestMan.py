@@ -114,27 +114,32 @@ def client_thread(kill_switch: Event, flist_lock: Lock, server: str, conn, conn_
 
             print(f'{server}: Launching fault injection with bitstream {faulty_bitstream} x {faulty_bit} ')
 
-            r = requests.post(server + '/fault_inj',
-                              files={
-                                'faulty_bitstream': open(faulty_bitstream, 'rb')
-                              },
-                              data={
-                                  'network_name': network_name,
-                              })
+            try:
+                r = requests.post(server + '/fault_inj',
+                                  files={
+                                    'faulty_bitstream': open(faulty_bitstream, 'rb')
+                                  },
+                                  data={
+                                      'network_name': network_name,
+                                  })
 
-            if r.status_code != 200:
-                print(f'{server}: Failed to launch fault injection on server {server}')
-                time.sleep(10)
-                continue
+                if r.status_code != 200:
+                    print(f'{server}: Failed to launch fault injection on server {server}')
+                    time.sleep(10)
+                    continue
 
-            r = requests.post(server + '/wait_run',
-                              data={
-                                  'timeout': 10
-                              })
+                r = requests.post(server + '/wait_run',
+                                  data={
+                                      'timeout': 10
+                                  })
 
-            if r.status_code != 200:
-                print(f'{server}: Failed to retrieve fault injection results')
-                time.sleep(10)
+                if r.status_code != 200:
+                    print(f'{server}: Failed to retrieve fault injection results')
+                    time.sleep(10)
+                    continue
+            except Exception as exp:
+                print(f'***********[ERROR]{server} Failed {exp}')
+                time.sleep(30)
                 continue
 
             fi_result = r.json()
@@ -174,7 +179,7 @@ def genrate_faults(flist_lock: Lock,
     total_faults = 10000
     while index < total_faults:
         bit_offset = random.randint(0, bman.N_WORDS_IN_FRAME * bman.n_frames * 32)
-        if bit_offset in ll_bitoffset:
+        if bit_offset in ll_bitoffset or is_fault_executed(db_conn, db_conn_lock, bit_offset):
             continue
         else:
             print(f"Scheduling F {index}/{total_faults} @{bit_offset}")
