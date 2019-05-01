@@ -10,6 +10,7 @@ import time
 from pprint import pprint
 from flask import Flask, request, jsonify
 from multiprocessing import Process, Pipe
+from threading import Thread
 
 
 current_fi_run = None
@@ -73,7 +74,7 @@ def workload(p: Pipe,
     })
 
 
-FAULTY_BITSTREAM_FOLDER = './FAULTY_BITSTREAMS/'
+FAULTY_BITSTREAM_FOLDER = '/home/xilinx/PynqSEUInj/FAULTY_BITSTREAMS/'
 app = Flask(__name__)
 
 fi_p_parent, fi_run_p_child = Pipe()
@@ -98,7 +99,7 @@ def do_fault_injection():
     current_fi_run = Process(target=workload, args=(fi_run_p_child,
                                                     network_name,
                                                     'road-signs',
-                                                    './images/cross.jpg'))
+                                                    '/home/xilinx/PynqSEUInj/images/cross.jpg'))
     current_fi_run.start()
 
     return jsonify({
@@ -170,6 +171,17 @@ def wait_run():
         xlnk.xlnk_reset()
         return jsonify(class_res)
 
+
+def safe_reboot():
+    # Start hardware watchdog to reboot when the application is stuck
+    with open('/dev/watchdog', 'w') as f_watchdog:
+        while True:
+            print('R', f_watchdog)
+            time.sleep(15)
+
+
+wd_thread = Thread(target=safe_reboot)
+wd_thread.start()
 
 app.run(host='0.0.0.0', port=5200)
 
