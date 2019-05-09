@@ -1,0 +1,13 @@
+[Unit]
+Description=BNN Fault Injection Server
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+User=root
+PermissionsStartOnly=true
+ExecStart=/home/xilinx/PynqSEUInj/BNN_FI_Server.py
+TimeoutSec=600
+Restart=on-failure
+RuntimeDirectoryMode=755

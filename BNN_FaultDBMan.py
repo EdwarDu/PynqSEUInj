@@ -259,4 +259,28 @@ class BNN_FaultInjMan:
         if not self.db_man.is_fault_executed(faulty_bits_str):
             pass
 
+    def fault_work_thread(self, bits):
+        faulty_bits_str = '-'.join([str(x) for x in bits])
+        faulty_bs_fname = './FAULTY_BITSTREAM/' + \
+                          BNN_FaultInjMan.NETWORK_NAME + \
+                          BNN_FaultInjMan.PLATFORM_NAME + \
+                          faulty_bits_str + '.bit'
+        self.generate_faulty_bs(bits, faulty_bs_fname)
+        fault = {
+            'bits': bits,
+            'faulty_bitstream': faulty_bs_fname
+        }
+        while True:
+            server_url = self.pick_server()
+            if server_url is None:
+                # no free server now
+                time.sleep(5)
+                continue
+            else:
+                self.launch_fault_in_server(fault, server_url)
+                break
+
+
+
+
 
