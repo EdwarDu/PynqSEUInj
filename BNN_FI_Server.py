@@ -8,7 +8,7 @@ import shutil
 import sys
 import time
 from pprint import pprint
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, abort
 from multiprocessing import Process, Pipe, Event
 from threading import Thread
 import logging
@@ -118,11 +118,7 @@ def wait_run():
     server_logger.info(f'wait_run: timeout {timeout} secs')
     if current_fi_run is None:
         server_logger.warning('wait_run: Not running')
-        return jsonify({
-            'index': -1,
-            'name': 'fi failed',
-            'duration': -1
-        })
+        abort(204)   # NO Content
     else:
         try:
             current_fi_run.join(timeout=timeout)
@@ -140,7 +136,6 @@ def wait_run():
                 fi_p_parent, fi_run_p_child = Pipe()
                 class_res = {
                     'index': -1,
-                    'name': 'timeout',
                     'duration': 0
                 }
         except TimeoutError as toe:
@@ -155,7 +150,6 @@ def wait_run():
             fi_p_parent, fi_run_p_child = Pipe()
             class_res = {
                 'index': -1,
-                'name': 'timeout',
                 'duration': 0
             }
 
@@ -170,6 +164,27 @@ def reboot():
     safe_reboot_event.clear()
     return jsonify({
         'status': 'rebooting'
+    })
+
+
+@app.route('/do_run', methods=['POST', ])
+def do_run():
+    global current_fi_run
+    global fi_run_p_child
+    global server_logger
+
+    network_name = request.form.get('network_name')
+    server_logger.info(f"New run: NO (NEW) FAULTY BIT")
+
+    current_fi_run = Process(target=workload, args=(fi_run_p_child,
+                                                    network_name,
+                                                    'road-signs',
+                                                    '/home/xilinx/PynqSEUInj/images/cross.jpg'))
+    current_fi_run.start()
+    server_logger.info(f"Run started")
+
+    return jsonify({
+        'running': current_fi_run.is_alive()
     })
 
 

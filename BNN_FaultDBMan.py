@@ -87,6 +87,86 @@ class BNN_FaultDBMan:
             return r
 
 
+class BNN_ServerMan:
+    def __init__(self, server_url: str, port: int = 5200):
+        self.server_url = server_url
+        self.port = port
+        self.server_request_url = f"{self.server_url}:{self.port}"
+        self.status = "unknown"
+        self.get_status()
+
+    def get_status(self):
+        try:
+            r = requests.post(f"{self.server_request_url}/is_running", timeout=3)
+            if r.status_code != 200:
+                self.status = "dead"
+            else:
+                r_json = r.json()
+                self.status = "idle" if r_json["running"] == "false" else "busy"
+        except requests.Timeout as toe:
+            self.status = "dead"
+
+        return self.status
+
+    def reboot(self):
+        try:
+            r = requests.post(f"{self.server_request_url}/reboot", timeout=3)
+            if r.status_code == 200:
+                self.status = "rebooting"
+            else:
+                self.status = "dead"
+        except requests.Timeout as toe:
+            self.status = "dead"
+
+    def launch_fault_inj(self, network_name, faulty_bitstream):
+        if self.get_status() != "idle":
+            return None
+
+        try:
+            self.status = "busy"
+            r = requests.post(f"{self.server_request_url}/fault_inj",
+                              files={
+                                  'faulty_bitstream': open(faulty_bitstream, 'rb')
+                              },
+                              data={
+                                  'network_name': network_name
+                              }, timeout=5)
+            if r.status_code != 200:
+                self.status = "dead"
+                return None
+
+            r = requests.post(f"{self.server_request_url}/wait_run", data={"timeout": 10},
+                              timeout=10)
+            if r.status_code == 204: # No content
+                self.status = self.get_status()
+                return None
+            elif r.status_code == 200:
+                self.status = self.get_status()
+                r_json = r.json()
+                class_index = r_json['index']
+                class_duration = r_json['duration']
+                os.remove(faulty_bitstream)
+                return class_index, class_duration
+            else:
+                self.status = "dead"
+                return None
+        except requests.Timeout as toe:
+            self.status = "dead"
+            return None
+
+
+class BNN_ClusterMan:
+    """ Helper (Man) class for managing multiple servers for BNN FI"""
+
+    def __init__(self, servers: list):
+        self.servers = [BNN_ServerMan(server, 5200) for server in servers]
+        self.servers_lock = Lock()
+
+    def launch_fault_inj(self, network_name, faulty_bitstream):
+        with self.servers_lock:
+            pass # TODO
+
+
 class BNN_FaultInjMan:
     NETWORK_NAME = 'cnvA1W1'
     PLATFORM_NAME = 'pynqZ1-Z2'
