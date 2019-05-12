@@ -150,6 +150,15 @@ def write_int32_to_file(f, d):
     f.write(struct.pack('>I', d))
 
 
+def compare_words_32(a, b, mask):
+    diffs = []
+    for i in range(0, 32):
+        if a & (1 << i) != b & (1 << i) and (mask is None or mask & (1 << i) == 0):
+            diffs.append(i)
+
+    return diffs
+
+
 class BitstreamMan:
     """
     Class for manipulating bitstream for
@@ -158,7 +167,7 @@ class BitstreamMan:
 
     N_WORDS_IN_FRAME = 101
 
-    def __init__(self, bitstream_file: str):
+    def __init__(self, bitstream_file: str, mask_file: str = None):
         if isfile(bitstream_file):
             self.bs_file = bitstream_file
         else:
@@ -221,6 +230,11 @@ class BitstreamMan:
         self.frame_word0_index = 0
         self.frame_word_lindex = 0
         self.decode_bitstream(f_debug_out=None)
+
+        if mask_file is not None:
+            self.mask_bm = BitstreamMan(mask_file)
+        else:
+            self.mask_bm = None
 
     def generate_bitstream_header(self):
         bitstream_header = struct.pack('>H', len(self.data_word))
@@ -398,6 +412,29 @@ class BitstreamMan:
 
     def set_word(self, frame_l_addr, frame_w_index, word_new):
         self.frame_words[frame_l_addr * self.N_WORDS_IN_FRAME + frame_w_index] = word_new
+
+    def compare_readback_binfile(self, rb_bin_fname: str, b_with_mask: bool = True):
+        with open(rb_bin_fname, "rb") as f_rb_bin:
+            frame_word_index = 0
+            diffs = []
+            # Remove padding frame
+            f_rb_bin.read(4*BitstreamMan.N_WORDS_IN_FRAME)
+
+            for word in self.frame_words:
+                rb_word = read_int32_from_file(f_rb_bin)
+                if b_with_mask and self.mask_bm is not None:
+                    mask_word = self.mask_bm.frame_words[frame_word_index]
+                else:
+                    mask_word = None
+
+                if word != rb_word:
+                    word_diffs = compare_words_32(word, rb_word, mask_word)
+                    if len(word_diffs) != 0:
+                        diffs.append([(frame_word_index, i) for i in word_diffs])
+
+                frame_word_index += 1
+
+            return diffs
 
 
 def load_ll_file(ll_filename: str):
