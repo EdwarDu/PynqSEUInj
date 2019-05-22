@@ -467,43 +467,16 @@ def load_ll_file(ll_filename: str):
     return ll_lst
 
 
-import time
-
 if __name__ == '__main__':
-    start_time = time.time()
-    bman = BitstreamMan(sys.argv[1])
-    end_time = time.time()
-    print(f"Loading {sys.argv[1]} cost {end_time-start_time} seconds")
+    bman = BitstreamMan(sys.argv[1], sys.argv[2])
+    with open('bit_frame_words.txt', 'w') as f_bit_frame_words:
+        for word in bman.frame_words:
+            print(f"{word:08X}", file=f_bit_frame_words)
 
-    with open('./original.log', 'w') as f_orig:
-        bman.decode_bitstream(f_debug_out=f_orig)
+    with open('mask_frame_words.txt', 'w') as f_mask_frame_words:
+        for word in bman.mask_bm.frame_words:
+            print(f"{word:08X}", file=f_mask_frame_words)
 
-    bit_value = bman.get_bit(0)
-    bit_value = 0 if bit_value == 1 else 1
-    bman.set_bit(0, bit_value)
-
-    start_time = time.time()
-    bman.dump_bitstream('./faulty.bit')
-    end_time = time.time()
-    print(f"Dumping ./faulty.bit cost {end_time-start_time} seconds")
-
-    bman_f = BitstreamMan('./faulty.bit')
-
-    with open('./faulty.log', 'w') as f_faulty:
-        bman_f.decode_bitstream(f_debug_out=f_faulty)
-
-    print(bman.design_name)
-    print(bman.part_name)
-    print(bman.design_date)
-    print(bman.design_time)
-    print(f"# Frames: {bman.n_frames}")
-
-    # for i in range(0x00061d32, 0x00062d32):
-    #     bman.frame_words[i] = 0x0
-
-    # bman.dump_bitstream('./cnvW1A1-pynqZ1-Z2.bit')
-
-    # ll_lst = load_ll_file("./PynqBNN_Test/cnvW1A1-pynqZ1-Z2.ll")
-
-
+    rbd_diffs = bman.compare_readback_binfile(sys.argv[3])
+    print(len(rbd_diffs))
 
