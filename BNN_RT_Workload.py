@@ -9,7 +9,9 @@ import time
 from multiprocessing import Process, Pipe, Event
 from threading import Thread
 import logging
-
+import signal
+from PIL import Image
+import numpy as np
 
 current_fi_run = None
 
@@ -19,16 +21,16 @@ PLATFORM = 'pynqZ1-Z2'
 xlnk = Xlnk()
 
 server_logger = logging.getLogger('FaultInjServer')
-fh = logging.FileHandler('./fault_inj.log')
-sh = logging.StreamHandler()
+fh = logging.FileHandler('/home/xilinx/PynqSEUInj/fault_inj.log')
+#sh = logging.StreamHandler()
 
 formatter = logging.Formatter('%(asctime)s:%(name)s:[%(levelname)s]: %(message)s')
 fh.setFormatter(formatter)
-sh.setFormatter(formatter)
+#sh.setFormatter(formatter)
 
 server_logger.setLevel(logging.INFO)
 server_logger.addHandler(fh)
-server_logger.addHandler(sh)
+#server_logger.addHandler(sh)
 
 
 workload_event = Event()
@@ -58,10 +60,12 @@ def classify_path(image_filename: str):
         classifier = bnn.LfcClassifier(network_name, classifier_name, bnn.RUNTIME_HW)
 
     while workload_event.is_set():
-        classifier_result_index = classifier.classify_path(image_filename)
+        classifier_details = classifier.classify_image_details(Image.open(image_filename))
         # classifier_result_name = classifier.class_name(classifier_result_index)
         classifier_duration = classifier.usecPerImage
-        server_logger.info(f"RESULT: {classifier_result_index} {classifier_duration}")
+        server_logger.info(f'DETAILS: {",".join([str(x) for x in classifier_details])} RESULT: {np.where(classifier_details == np.max(classifier_details))} {classifier_duration}')
+        os.system(f'wall -n "DETAILS: {",".join([str(x) for x in classifier_details])} RESULT: {np.where(classifier_details == np.max(classifier_details))} {classifier_duration}"')
+        time.sleep(1)
 
     xlnk.xlnk_reset()
 
@@ -87,24 +91,34 @@ wd_thread.start()
 
 wl_thread = None
 
-while True:
-    choice = input()
-    if choice == 'S':
-        workload_event.set()
-        wl_thread = Thread(target=classify_path, args=("./road_signs/stop.jpg", ))
-        wl_thread.start()
-    elif choice == 'X':
+
+def signal_handler(sig, frame):
+    global wl_thread, wd_thread
+
+    if wl_thread is not None and wl_thread.is_alive():
         workload_event.clear()
         wl_thread.join()
         wl_thread = None
-        server_logger.info(f"Workload thread stopped")
-    elif choice == 'Q':
-        if wl_thread is not None and wl_thread.is_alive():
-            workload_event.clear()
-            wl_thread.join()
-            wl_thread = None
-        server_logger.info(f"Quiting")
-        break
+
+    safe_reboot_event.clear()
+    wd_thread.join()
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, signal_handler)
+
+workload_event.set()
+wl_thread = Thread(target=classify_path, args=("/home/xilinx/PynqSEUInj/road_signs/stop.jpg",))
+wl_thread.start()
+
+while not os.path.exists("/home/xilinx/PynqSEUInj/kill"):
+    time.sleep(1)
+
+os.remove("/home/xilinx/PynqSEUInj/kill")
+
+workload_event.clear()
+wl_thread.join()
+wl_thread = None
 
 safe_reboot_event.clear()
 wd_thread.join()
